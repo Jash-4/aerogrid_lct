@@ -5,11 +5,11 @@ An autonomous, zero-database, in-memory electrical topology tracking and islandi
 ---
 
 ## 1. Problem Statement & Real-World Domain
-Modern power grids are transitioning into decentralized microgrids with distributed renewable sources (Solar PV, Battery Energy Storage Systems, localized gensets). During electrical faults, physical breakers trip within milliseconds, creating isolated sub-networks ("electrical islands").
+Modern power grids are transitioning into decentralized microgrids with distributed renewable sources (Solar PV, Battery Energy Storage Systems, localized gensets). During electrical faults, physical circuit breakers trip within milliseconds, creating isolated sub-networks ("electrical islands").
 
-Conventional approaches fail in high-voltage grids:
+Conventional software architectures fail in high-voltage physical grids:
 - **Relational / Time-Series Databases:** High I/O, disk logging, and serialization latencies (10–500 ms) violate microsecond arc-fault protection windows.
-- **Static Graph Algorithms (BFS/DFS):** Require full $O(V + E)$ graph traversals on every breaker trip.
+- **Static Graph Algorithms (BFS/DFS):** Require full $O(V + E)$ graph traversals on every breaker trip, creating computational lag across large feeder networks.
 - **Disjoint-Set Union (DSU):** Does not support edge deletions (`cut`) because path compression destroys tree hierarchy.
 
 **AeroGrid-LCT** executes edge insertions (`link`), breaker trips (`cut`), reachability checks (`find_root`), and transmission path bottleneck queries in amortized $O(\log V)$ time with a strict $O(V)$ memory footprint.
@@ -39,12 +39,137 @@ Conventional approaches fail in high-voltage grids:
 
 ---
 
-## 4. How to Run
+## 4. System Architecture & UML Class Diagram
+
+AeroGrid-LCT structures electrical telemetry and protection using two Gang-of-Four (GoF) design patterns:
+1. **Command Pattern (`IBreakerCommand`):** Provides reversible switchgear actions (`CloseBreakerCommand`, `TripBreakerCommand`) with `.undo()` support for black-start recovery simulations.
+2. **Observer Pattern (`IGridObserver`):** Pushes asynchronous notifications to physical protection relays (`MicrogridSafetyRelay`) upon detecting an electrical islanding condition.
+
+```mermaid
+classDiagram
+    direction TB
+
+    %% ==========================================
+    %% 1. CORE DATA STRUCTURE LAYER
+    %% ==========================================
+    class LCTNode {
+        +int bus_id
+        +str name
+        +float capacity_kva
+        +float min_capacity
+        +bool is_reversed
+        +Optional~LCTNode~ left
+        +Optional~LCTNode~ right
+        +Optional~LCTNode~ parent
+        +__init__(bus_id, name, capacity_kva)
+        +is_root() bool
+        +push_down() void
+        +push_up() void
+    }
+
+    %% ==========================================
+    %% 2. TOPOLOGY & ALGORITHMIC ENGINE LAYER
+    %% ==========================================
+    class AeroGridEngine {
+        -Optional~IGridObserver~ _observer
+        +__init__()
+        +set_observer(observer: IGridObserver) void
+        +link(u: LCTNode, v: LCTNode) bool
+        +cut(u: LCTNode, v: LCTNode) bool
+        +is_connected(u: LCTNode, v: LCTNode) bool
+        +query_bottleneck(u: LCTNode, v: LCTNode) float
+        +find_root(x: LCTNode) LCTNode
+        +make_root(x: LCTNode) void
+        +access(x: LCTNode) Optional~LCTNode~
+        -_rotate(x: LCTNode) void
+        -_splay(x: LCTNode) void
+        -_push_all_down(x: LCTNode) void
+    }
+
+    %% ==========================================
+    %% 3. OBSERVER PATTERN LAYER (Safety Relays)
+    %% ==========================================
+    class IGridObserver {
+        <<interface>>
+        +on_islanding(bus_a: LCTNode, bus_b: LCTNode, island_root: LCTNode)* void
+        +on_grid_restored(bus_a: LCTNode, bus_b: LCTNode)* void
+    }
+
+    class MicrogridSafetyRelay {
+        +on_islanding(bus_a: LCTNode, bus_b: LCTNode, island_root: LCTNode) void
+        +on_grid_restored(bus_a: LCTNode, bus_b: LCTNode) void
+    }
+
+    %% ==========================================
+    %% 4. COMMAND PATTERN LAYER (Switchgear Control)
+    %% ==========================================
+    class IBreakerCommand {
+        <<interface>>
+        +execute()* bool
+        +undo()* bool
+    }
+
+    class CloseBreakerCommand {
+        -AeroGridEngine engine
+        -LCTNode u
+        -LCTNode v
+        -_was_executed: bool
+        +__init__(engine, u, v)
+        +execute() bool
+        +undo() bool
+    }
+
+    class TripBreakerCommand {
+        -AeroGridEngine engine
+        -LCTNode u
+        -LCTNode v
+        -_was_executed: bool
+        +__init__(engine, u, v)
+        +execute() bool
+        +undo() bool
+    }
+
+    %% ==========================================
+    %% 5. EXPLICIT RELATIONSHIPS & CARDINALITIES
+    %% ==========================================
+
+    %% Self-association within the Link-Cut Tree
+    LCTNode "0..1" --> "0..1" LCTNode : left / right (Auxiliary Tree)
+    LCTNode "0..1" --> "0..1" LCTNode : parent / path-parent
+
+    %% Engine relationships
+    AeroGridEngine "1" o-- "0..1" IGridObserver : aggregates (_observer)
+    AeroGridEngine ..> LCTNode : manipulates via access / link / cut
+
+    %% Observer realization & method parameters
+    IGridObserver <|.. MicrogridSafetyRelay : realizes
+    IGridObserver ..> LCTNode : passes in event parameters
+
+    %% Command realization & associations
+    IBreakerCommand <|.. CloseBreakerCommand : realizes
+    IBreakerCommand <|.. TripBreakerCommand : realizes
+
+    CloseBreakerCommand "many" --> "1" AeroGridEngine : invokes link() / cut()
+    CloseBreakerCommand "many" --> "2" LCTNode : targets bus u, v
+    TripBreakerCommand "many" --> "1" AeroGridEngine : invokes cut() / link()
+    TripBreakerCommand "many" --> "2" LCTNode : targets bus u, v
+```
+
+---
+
+## 5. How to Run
 Ensure Python 3.8+ is installed:
 
 ```bash
 # Verify base node implementation
-python3 lct_node.py
+python lct_node.py
 
-# Run the complete microgrid simulation and test harness
-python3 main_simulation.py
+# Verify engine primitives
+python grid_engine.py
+
+# Verify design patterns
+python grid_patterns.py
+
+# Run complete simulation and interactive CLI
+python main_simulation.py
+```
