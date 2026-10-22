@@ -23,7 +23,7 @@ Conventional software architectures fail in high-voltage physical grids:
 | **Member 1** | `lct_node.py` | Core dynamic node structure, path-parent pointer mechanics, and lazy propagation (`push_down`, `push_up`). |
 | **Member 2** | `grid_engine.py` | Link-Cut Tree primitives (`_rotate`, `_splay`, `access`, `make_root`, `link`, `cut`, `find_root`). |
 | **Member 3** | `grid_patterns.py` | Software architecture: Command Pattern for breaker rollback (`undo`) and Observer Pattern for safety relay alarms. |
-| **Member 4** | `main_simulation.py` | Faculty test verification, edge-case assertions (cycles, invalid cuts), and interactive demo CLI. |
+| **Member 4** | `main_simulation.py` & `gui_app.py` | Simulation test harness, faculty edge-case assertions, and real-time Tkinter SCADA GUI visualizer. |
 
 ---
 
@@ -153,23 +153,3 @@ classDiagram
     CloseBreakerCommand "many" --> "2" LCTNode : targets bus u, v
     TripBreakerCommand "many" --> "1" AeroGridEngine : invokes cut() / link()
     TripBreakerCommand "many" --> "2" LCTNode : targets bus u, v
-```
-
----
-
-## 5. How to Run
-Ensure Python 3.8+ is installed:
-
-```bash
-# Verify base node implementation
-python lct_node.py
-
-# Verify engine primitives
-python grid_engine.py
-
-# Verify design patterns
-python grid_patterns.py
-
-# Run complete simulation and interactive CLI
-python main_simulation.py
-```
